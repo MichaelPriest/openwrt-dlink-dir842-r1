@@ -1,0 +1,22 @@
+--- a/drivers/net/wireless/realtek/rtw88/regd.c
++++ b/drivers/net/wireless/realtek/rtw88/regd.c
+@@ -378,8 +378,17 @@ static int rtw_regd_notifier_apply(struct rtw_dev *rtwdev,
+ 				   struct wiphy *wiphy,
+ 				   struct regulatory_request *request)
+ {
+-	if (request->initiator == NL80211_REGDOM_SET_BY_USER)
++	/*
++	 * Keep a programmed efuse country authoritative, but allow userspace to
++	 * select the real operating country on worldwide/blank-efuse hardware.
++	 * The DIR-842 R1 RTL8822BE has country_code ff:ff; ignoring the user
++	 * request leaves the initial world-domain NO-IR flags stuck on channels
++	 * that the selected regulatory database would otherwise permit.
++	 */
++	if (request->initiator == NL80211_REGDOM_SET_BY_USER &&
++	    rtwdev->efuse.country_code[0] != 0xff &&
++	    rtwdev->efuse.country_code[1] != 0xff)
+ 		return 0;
++
+ 	rtwdev->regd = rtw_regd_find_reg_by_name(request->alpha2);
+ 	rtw_regd_apply_world_flags(wiphy, request->initiator);
+ 
