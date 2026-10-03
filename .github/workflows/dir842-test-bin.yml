@@ -1,5 +1,7 @@
 name: DIR-842 R1 Test BIN
 
+# test.1 retry: Bullseye CI repository pin applied
+
 on:
   push:
     branches:
