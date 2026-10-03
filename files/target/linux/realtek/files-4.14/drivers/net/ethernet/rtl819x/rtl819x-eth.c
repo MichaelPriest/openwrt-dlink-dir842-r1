@@ -919,6 +919,11 @@ static int fabric_gw_rearm = 1;
 module_param(fabric_gw_rearm, int, 0644);
 MODULE_PARM_DESC(fabric_gw_rearm, "level-3 recovery re-arms the ASIC gw program (default 1; set 0 in bridge role)");
 
+static int fabric_hwnat_rearm = 1;
+module_param(fabric_hwnat_rearm, int, 0644);
+MODULE_PARM_DESC(fabric_hwnat_rearm,
+		 "level-3 recovery re-arms hardware NAT (default 1; set 0 in bridge role)");
+
 static int fabric_reset_mode;	/* latched ladder level for the queued hang_work */
 
 static void rtl819x_hang_work(struct work_struct *w)
@@ -984,7 +989,10 @@ static void rtl819x_hang_work(struct work_struct *w)
 	mutex_unlock(&rtl865x_hal_lock);
 
 	if (mode >= 3) {
-		rtl819x_hwnat_start(priv->dev);
+		if (fabric_hwnat_rearm)
+			rtl819x_hwnat_start(priv->dev);
+		else
+			pr_err("rtl819x: HW NAT re-arm SKIPPED (fabric_hwnat_rearm=0, bridge role)\n");
 		/*
 		 * M7 self-heal: FULL_RST wiped the ASIC TLU tables (netif MACs,
 		 * L2/L3 routes, nexthops, ACL permits) — without them the ASIC
@@ -1086,7 +1094,7 @@ static void rtl819x_hang_check(struct rtl819x_eth_priv *priv)
 					       dfail);
 				}
 			} else if (dfail >= 4 && dfail >= 4 * dok) {
-				pr_err("rtl819x: FABRIC WEDGE detected (large-frame FCS fail=%u ok=%u in 10s)%s\n",
+				pr_err("rtl819x: FABRIC WEDGE detected (large-frame FCS fail=%u ok=%u in ~2.5s)%s\n",
 				       dfail, dok,
 				       fabric_autoreset ? " - auto recovery" : " - set fabric_reset=3 to recover");
 				/* !fcs_last_auto == "never fired" (INITIAL_JIFFIES on
@@ -1157,7 +1165,7 @@ static void rtl819x_hang_check(struct rtl819x_eth_priv *priv)
 				pr_err("rtl819x: RX-STALL WEDGE detected (USEDDSC=%u, rx_packets frozen at %lu)%s\n",
 				       used, rx,
 				       fabric_autoreset ? " - auto recovery"
-						        : " - set fabric_reset=2 to recover");
+						        : " - set fabric_reset=3 to recover");
 				/* Same holdoff convention as the FCS path above:
 				 * !stall_last_auto means "never fired" (INITIAL_JIFFIES
 				 * on MIPS would otherwise defer the first one), |1 keeps
