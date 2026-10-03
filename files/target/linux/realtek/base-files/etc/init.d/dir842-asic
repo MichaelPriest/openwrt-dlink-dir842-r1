@@ -119,11 +119,10 @@ wait_netif_mac() {
 #
 #     uci set dir842.asic.role='bridge'; uci commit dir842
 #
-# ⚠ ONE-WAY at runtime. bridge->router via uci + `restart` is fine. The reverse
-# is NOT: nothing in bridge role clears TEACR bit0, and no userspace knob exists
-# to unfreeze L2 aging, so a router->bridge flip by `restart` leaves aging FROZEN
-# and the router L3 tables programmed while the log below claims "L2 aging left
-# ENABLED". REBOOT after switching router->bridge.
+# Runtime role changes are handled symmetrically: level-3 recovery clears the
+# hardware tables in both directions. In bridge mode the kernel recovery gate
+# skips gw/NAT re-arm and explicitly clears TEACR bit0 after restoring the fabric
+# snapshot, so L2/ARP aging is enabled again without requiring a reboot.
 asic_role() {
 	local r
 	r="$(uci -q get dir842.asic.role)"
@@ -213,10 +212,9 @@ asic_up() {
 
 	wait_netif_mac
 	asic_program
-	# The warm-up exists to re-prime the L2 tables after gw_prog WIPES them
-	# (see step 3/4 in the header). In bridge role we run neither gw_prog nor
-	# fabric_reset, so nothing wipes them — the warm would just be ~9s of
-	# pinging peers that may not even exist on this network. Skip it.
+	# The warm-up exists to re-prime the routed L2/ARP/nexthop chain after
+	# gw_prog. Bridge role does run the full fabric reset now, but it deliberately
+	# skips gw_prog/NAT and needs no routed nexthop warm-up.
 	if [ "$ROLE" = "router" ]; then
 		asic_warm
 	fi
