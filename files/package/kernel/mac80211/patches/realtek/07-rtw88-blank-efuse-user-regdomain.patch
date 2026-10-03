@@ -1,6 +1,6 @@
 --- a/drivers/net/wireless/realtek/rtw88/regd.c
 +++ b/drivers/net/wireless/realtek/rtw88/regd.c
-@@ -378,8 +378,17 @@ static int rtw_regd_notifier_apply(struct rtw_dev *rtwdev,
+@@ -378,8 +378,18 @@ static int rtw_regd_notifier_apply(struct rtw_dev *rtwdev,
  				   struct wiphy *wiphy,
  				   struct regulatory_request *request)
  {
