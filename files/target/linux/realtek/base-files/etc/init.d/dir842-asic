@@ -149,10 +149,12 @@ asic_program() {
 	# ROUTER mode; in bridge role the ASIC is left in its loader L2 state and
 	# plain switching works (measured: association, broadcast/multicast and
 	# client ARP all traverse).
-	if [ "$ROLE" = "router" ]; then
-		echo 3 > /sys/module/rtl819x/parameters/fabric_reset 2>/dev/null
-		sleep 3
-	fi
+	# Run the full reset in both roles. asic_up() sets fabric_gw_rearm
+	# before entering here: router=1 rebuilds L3/L4 state, bridge=0 leaves
+	# the fabric in clean L2-only mode. This also clears stale router state
+	# when switching router -> bridge via restart.
+	echo 3 > /sys/module/rtl819x/parameters/fabric_reset 2>/dev/null
+	sleep 3
 	# read side-effect: gw_prog() programs the whole L3/L4 datapath. NOTE this WIPES
 	# the ASIC L2 tables, so the warm-up must come after.
 	# gw_prog: L3/L4 datapath + TEACR aging freeze. ROUTER ONLY (see asic_role).
@@ -201,9 +203,11 @@ asic_up() {
 	# and fabric_gw_rearm=0 keeps the bridge-unsafe half switched off.
 	if [ "$ROLE" = "bridge" ]; then
 		echo 3 > /sys/module/rtl819x/parameters/fabric_autoreset 2>/dev/null
+		echo 0 > /sys/module/rtl819x/parameters/fabric_hwnat_rearm 2>/dev/null
 		echo 0 > /sys/module/rtl819x/parameters/fabric_gw_rearm 2>/dev/null
 	else
 		echo 3 > /sys/module/rtl819x/parameters/fabric_autoreset 2>/dev/null
+		echo 1 > /sys/module/rtl819x/parameters/fabric_hwnat_rearm 2>/dev/null
 		echo 1 > /sys/module/rtl819x/parameters/fabric_gw_rearm 2>/dev/null
 	fi
 
@@ -226,6 +230,10 @@ asic_up() {
 	# hwnat is a NAT/routing offload; a bridge never routes. Leave it disarmed.
 	if [ "$ROLE" = "router" ]; then
 		echo 1 > /sys/module/rtl819x/parameters/hwnat 2>/dev/null
+	else
+		# Keep bridge mode idempotent even after a previous router role or
+		# a manual HW-NAT experiment.
+		echo 0 > /sys/module/rtl819x/parameters/hwnat 2>/dev/null
 	fi
 	logger -t dir842-asic "ASIC up ($ROLE): netif MAC $(cat /sys/class/net/eth0.2/address 2>/dev/null), hwnat=$(cat /sys/module/rtl819x/parameters/hwnat 2>/dev/null)"
 }
