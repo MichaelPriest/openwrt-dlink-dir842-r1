@@ -977,8 +977,21 @@ static void rtl819x_hang_work(struct work_struct *w)
 		udelay(100);
 		REG32(CPUICR) = 0;
 	}
-	if (mode >= 3)
+	if (mode >= 3) {
 		rtl819x_fabric_full_reset();
+
+		/*
+		 * The fabric snapshot includes TEACR.  If level 3 was triggered
+		 * while switching router -> bridge, that snapshot may still carry
+		 * bit0 from gw_prog(), which disables L2/ARP aging.  Skipping
+		 * gw_rearm alone is therefore not enough: explicitly unfreeze
+		 * aging whenever the bridge gate is active.
+		 */
+		if (!fabric_gw_rearm) {
+			REG32(0xBB804400) &= ~BIT(0); /* TEACR: L2/ARP aging enabled */
+			pr_err("rtl819x: bridge recovery: TEACR L2/ARP aging un-frozen\n");
+		}
+	}
 
 	New_swNic_init(rxcnt, txcnt, RTL819X_CLUSTER_SIZE);
 	rtl865x_start();
