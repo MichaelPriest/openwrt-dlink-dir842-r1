@@ -108,6 +108,15 @@ cp "$SELF_DIR/feeds.conf" feeds.conf
 cp "$SELF_DIR/seed-m5.config" .config
 
 make defconfig
+
+# CI-only fast preflight: unpack mac80211/backports and apply the Realtek patch
+# stack before spending the full build time.  This catches malformed/conflicting
+# rtw88 patches with a precise V=s log while remaining a no-op for normal users.
+if [ "${DIR842_CI_PREFLIGHT:-0}" = "1" ]; then
+	echo ">>> CI preflight: package/kernel/mac80211/prepare (-j1 V=s)"
+	make package/kernel/mac80211/prepare -j1 V=s
+fi
+
 if ! make -j"$(nproc)"; then
 	echo
 	echo ">>> Parallel build failed; retrying incrementally with -j1 V=s for diagnostics"
