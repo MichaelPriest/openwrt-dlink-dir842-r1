@@ -108,7 +108,11 @@ cp "$SELF_DIR/feeds.conf" feeds.conf
 cp "$SELF_DIR/seed-m5.config" .config
 
 make defconfig
-make -j"$(nproc)"
+if ! make -j"$(nproc)"; then
+	echo
+	echo ">>> Parallel build failed; retrying incrementally with -j1 V=s for diagnostics"
+	make -j1 V=s
+fi
 
 echo
 echo "Build complete. Images are in:"
