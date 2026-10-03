@@ -33,6 +33,7 @@ jobs:
       - name: Build OpenWrt images
         run: |
           docker run --rm \
+            -e DIR842_CI_PREFLIGHT=1 \
             -v "$PWD":/build \
             -w /build \
             dir842-openwrt-build \
