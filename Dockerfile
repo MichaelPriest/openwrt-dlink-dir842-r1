@@ -15,7 +15,14 @@
 #   docker build --build-arg U=$(id -u) --build-arg G=$(id -g) -t owrt-dir842 .
 FROM debian:bullseye
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+# Bullseye's security/update mirrors can transiently publish indices whose
+# package files have already moved to the archive.  This old OpenWrt tree needs
+# the Bullseye-era toolchain, not the newest security revisions, so pin the
+# container to the base Bullseye repository for reproducible CI builds.
+RUN printf 'deb http://deb.debian.org/debian bullseye main\n' > /etc/apt/sources.list && \
+    rm -f /etc/apt/sources.list.d/* && \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
       gettext git libncurses5-dev libssl-dev rsync unzip zlib1g-dev file \
       wget curl subversion swig time xsltproc libelf-dev bc python3 python2 \
