@@ -175,7 +175,8 @@ logger -t dir842 "wifi BSSID MAC: $DIR842_WIFI_MAC"
 #   would ship a 5 GHz-only box on a virgin overlay. To reset only this radio:
 #   delete wireless.radio0 / delete wireless.default_radio0.
 uci -q batch <<'EOF'
-delete wireless
+delete wireless.radio0
+delete wireless.default_radio0
 set wireless.radio0='wifi-device'
 set wireless.radio0.type='mac80211'
 set wireless.radio0.hwmode='11a'
