@@ -1,0 +1,57 @@
+name: DIR-842 R1 Test BIN
+
+on:
+  push:
+    branches:
+      - feature/dir842-v1.4.1-test1
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
+          docker system prune -af || true
+          df -h
+
+      - name: Build Debian 11 toolchain container
+        run: |
+          docker build \
+            --build-arg U=$(id -u) \
+            --build-arg G=$(id -g) \
+            -t dir842-openwrt-build .
+
+      - name: Build OpenWrt images
+        run: |
+          docker run --rm \
+            -v "$PWD":/build \
+            -w /build \
+            dir842-openwrt-build \
+            ./build.sh
+
+      - name: Collect and checksum test images
+        run: |
+          set -eux
+          OUT=openwrt/bin/targets/realtek/rtl8197f
+          mkdir -p artifacts
+          cp "$OUT"/*-initramfs-kernel.bin artifacts/
+          cp "$OUT"/*-squashfs-factory.bin artifacts/
+          cp "$OUT"/*-squashfs-sysupgrade.bin artifacts/
+          (cd artifacts && sha256sum *.bin > SHA256SUMS.txt)
+          ls -lh artifacts
+          cat artifacts/SHA256SUMS.txt
+
+      - name: Upload Test 1 BINs
+        uses: actions/upload-artifact@v4
+        with:
+          name: DIR842-R1-OpenWrt-v1.4.1-test.1
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 30
