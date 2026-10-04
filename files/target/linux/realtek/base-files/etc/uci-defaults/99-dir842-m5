@@ -179,6 +179,12 @@ delete wireless.radio0
 delete wireless.default_radio0
 set wireless.radio0='wifi-device'
 set wireless.radio0.type='mac80211'
+# This board has exactly one cfg80211/mac80211 PHY (the RTL8822BE).  The 2.4 GHz
+# rtl8192cd radio is WEXT-only and exposes no phy.  99-dir842-m5 recreates radio0
+# after wifi config, so without this binding the generated path/phy metadata is
+# lost and netifd fails with "Could not find PHY for device 'radio0'".  Hardware
+# validation on DIR-842 R1 confirmed phy0 + wlan1 brings the AP up at 17 dBm.
+set wireless.radio0.phy='phy0'
 set wireless.radio0.hwmode='11a'
 set wireless.radio0.channel='36'
 # ★ HT20, NOT VHT80/VHT40 — measured on this unit 2026-09-01: at 80 MHz (and 40 MHz)
@@ -209,6 +215,8 @@ set wireless.default_radio0='wifi-iface'
 set wireless.default_radio0.device='radio0'
 set wireless.default_radio0.network='lan'
 set wireless.default_radio0.mode='ap'
+# rtl8192cd owns wlan0; pin rtw88 AP to wlan1 to avoid the netdev-name collision.
+set wireless.default_radio0.ifname='wlan1'
 set wireless.default_radio0.ssid='DIR842-OpenWrt'
 # R3 security: ship the radio UNCONFIGURED-open-less, i.e. with NO pre-shared key.
 # The previous default baked the literal PSK 'dir842wifi' into every image, which is
