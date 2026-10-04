@@ -92,10 +92,49 @@ cp "$SELF_DIR/feeds.conf" feeds.conf
 # pages with it, and you get an image with no web UI and no error anywhere.
 # (That shipped once. The seed now also selects uhttpd/luci-mod-admin-full by
 # name so a feed change cannot repeat it.)
-./scripts/feeds install luci luci-base luci-mod-admin-full luci-theme-bootstrap \
+./scripts/feeds install luci luci-base luci-mod-admin-full \
+                        luci-theme-bootstrap luci-theme-material \
                         luci-app-firewall luci-app-upnp luci-app-opkg \
                         luci-proto-ppp uhttpd uhttpd-mod-ubus \
                         cgi-io miniupnpd qos-scripts
+
+# LuCI 19.07 only exposes WPA/WPA2 choices for wireless types it knows
+# explicitly (mac80211/broadcom). The DIR-842 2.4 GHz radio uses our custom
+# rtl8192cd netifd backend, whose WPA2-PSK handshake runs inside the vendor
+# driver, so stock LuCI incorrectly offers only WEP/open. Teach the UI the
+# modes that rtl8192cd.sh actually accepts: psk2, psk-mixed and psk.
+LUCI_WIFI_JS="feeds/luci/modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js"
+python3 - "$LUCI_WIFI_JS" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+needle = """\t\t\t\telse if (hwtype == 'broadcom') {
+\t\t\t\t\tcrypto_modes.push(['psk2',     'WPA2-PSK',                    33]);
+\t\t\t\t\tcrypto_modes.push(['psk+psk2', 'WPA-PSK/WPA2-PSK Mixed Mode', 22]);
+\t\t\t\t\tcrypto_modes.push(['psk',      'WPA-PSK',                     21]);
+\t\t\t\t}
+"""
+replacement = """\t\t\t\telse if (hwtype == 'rtl8192cd') {
+\t\t\t\t\t// Vendor WEXT AP: WPA/WPA2 is handled in-kernel by rtl8192cd,
+\t\t\t\t\t// not hostapd. These values map directly in rtl8192cd.sh.
+\t\t\t\t\tcrypto_modes.push(['psk2',      'WPA2-PSK',                    35]);
+\t\t\t\t\tcrypto_modes.push(['psk-mixed', 'WPA-PSK/WPA2-PSK Mixed Mode', 22]);
+\t\t\t\t\tcrypto_modes.push(['psk',       'WPA-PSK',                     21]);
+\t\t\t\t}
+\t\t\t\telse if (hwtype == 'broadcom') {
+\t\t\t\t\tcrypto_modes.push(['psk2',     'WPA2-PSK',                    33]);
+\t\t\t\t\tcrypto_modes.push(['psk+psk2', 'WPA-PSK/WPA2-PSK Mixed Mode', 22]);
+\t\t\t\t\tcrypto_modes.push(['psk',      'WPA-PSK',                     21]);
+\t\t\t\t}
+"""
+if needle not in s:
+    raise SystemExit("ERROR: pinned LuCI wireless.js layout changed; rtl8192cd security patch not applied")
+p.write_text(s.replace(needle, replacement, 1))
+PY
+grep -q "hwtype == 'rtl8192cd'" "$LUCI_WIFI_JS" || {
+	echo "ERROR: LuCI rtl8192cd WPA2 support patch missing" >&2
+	exit 1
+}
 
 # Seed config: shipped from seed-m5.config so this script builds what the port
 # actually is today (squashfs flash image + LuCI + PPPoE + offload diagnostics), not
@@ -108,7 +147,36 @@ cp "$SELF_DIR/feeds.conf" feeds.conf
 cp "$SELF_DIR/seed-m5.config" .config
 
 make defconfig
-make -j"$(nproc)"
+
+# DIR-842 LuCI contract: PT-BR and Material are intentional image features, not
+# optional feed side effects. Fail early if feed metadata drift makes them vanish.
+for cfg in \
+	'CONFIG_PACKAGE_luci-theme-material=y' \
+	'CONFIG_LUCI_LANG_pt_BR=y' \
+	'CONFIG_PACKAGE_luci-i18n-base-pt-br=y' \
+	'CONFIG_PACKAGE_luci-i18n-firewall-pt-br=y' \
+	'CONFIG_PACKAGE_luci-i18n-upnp-pt-br=y' \
+	'CONFIG_PACKAGE_luci-i18n-opkg-pt-br=y'
+do
+	grep -qx "$cfg" .config || {
+		echo "ERROR: required LuCI setting missing after defconfig: $cfg" >&2
+		exit 1
+	}
+done
+
+# CI-only fast preflight: unpack mac80211/backports and apply the Realtek patch
+# stack before spending the full build time.  This catches malformed/conflicting
+# rtw88 patches with a precise V=s log while remaining a no-op for normal users.
+if [ "${DIR842_CI_PREFLIGHT:-0}" = "1" ]; then
+	echo ">>> CI preflight: package/kernel/mac80211/prepare (-j1 V=s)"
+	make package/kernel/mac80211/prepare -j1 V=s
+fi
+
+if ! make -j"$(nproc)"; then
+	echo
+	echo ">>> Parallel build failed; retrying incrementally with -j1 V=s for diagnostics"
+	make -j1 V=s
+fi
 
 echo
 echo "Build complete. Images are in:"

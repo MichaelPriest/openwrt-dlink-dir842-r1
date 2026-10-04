@@ -1,0 +1,120 @@
+#!/bin/sh
+# Configure the DIR-842 R1 as a routed gateway or a dumb AP/bridge.
+# This script only writes UCI. A reboot is required after a role change because
+# the RTL8197F router path can freeze ASIC L2 aging; booting in bridge role is the
+# safe transition. LuCI invokes this via /bin/sh, so executable mode is not needed.
+
+set -e
+
+mode="$1"
+
+# Optional UCI fields are not guaranteed to exist in every configuration.
+# With "set -e", a plain "uci -q delete" still returns non-zero when the
+# option is absent and used to abort AP conversion halfway through, leaving
+# only uncommitted /tmp/.uci deltas that vanished on reboot.
+uci_delete() {
+	uci -q delete "$1" >/dev/null 2>&1 || true
+}
+
+# Older preserved overlays may predate this config section. Make the role
+# selector self-healing instead of relying on the factory /etc/config/dir842.
+uci -q get dir842.asic >/dev/null 2>&1 || uci set dir842.asic='asic'
+
+find_vlan() {
+	local wanted="$1" s
+	for s in $(uci show network 2>/dev/null | sed -n "s/^network\.\([^=]*\)=switch_vlan$/\1/p"); do
+		[ "$(uci -q get network.$s.vlan)" = "$wanted" ] && {
+			echo "$s"
+			return 0
+		}
+	done
+	return 1
+}
+
+v1="$(find_vlan 1)" || {
+	echo "DIR-842: VLAN 1 section not found" >&2
+	exit 1
+}
+v2="$(find_vlan 2)" || {
+	echo "DIR-842: VLAN 2 section not found" >&2
+	exit 1
+}
+
+case "$mode" in
+	ap|bridge)
+		uci -q set dir842.asic.role='bridge'
+
+		# Physical WAN jack (switch port 4) joins the LAN VLAN. VLAN 1 remains
+		# CPU-only so eth0.1 exists but carries no external jack.
+		uci -q set network.$v1.ports='6t'
+		uci -q set network.$v2.ports='0 1 2 3 4 6t'
+
+		uci -q set network.lan.type='bridge'
+		uci -q set network.lan.ifname='eth0.2'
+		uci -q set network.lan.proto='dhcp'
+		uci_delete network.lan.ipaddr
+		uci_delete network.lan.netmask
+		uci_delete network.lan.gateway
+		uci_delete network.lan.dns
+
+		uci -q set network.wan.ifname='eth0.1'
+		uci -q set network.wan.proto='none'
+		uci -q set network.wan.auto='0'
+
+		# The upstream/main router owns DHCP in AP mode.
+		uci -q set dhcp.lan.ignore='1'
+		uci_delete dhcp.lan.dhcpv6
+		uci_delete dhcp.lan.ra
+		uci_delete dhcp.lan.ra_slaac
+		uci_delete dhcp.lan.ra_flags
+
+		# L3/NAT offload is meaningless in a transparent bridge and historically
+		# caused stale-L2 blackholes on this ASIC.
+		uci -q set firewall.@defaults[0].flow_offloading='0'
+		uci -q set firewall.@defaults[0].flow_offloading_hw='0'
+		;;
+
+	router)
+		uci -q set dir842.asic.role='router'
+
+		uci -q set network.$v1.ports='4 6t'
+		uci -q set network.$v2.ports='0 1 2 3 6t'
+
+		uci -q set network.lan.type='bridge'
+		uci -q set network.lan.ifname='eth0.2'
+		uci -q set network.lan.proto='static'
+		uci -q set network.lan.ipaddr='192.168.0.1'
+		uci -q set network.lan.netmask='255.255.255.0'
+		uci_delete network.lan.gateway
+		uci_delete network.lan.dns
+
+		uci -q set network.wan.ifname='eth0.1'
+		uci -q set network.wan.proto='dhcp'
+		uci -q set network.wan.auto='1'
+
+		uci -q set dhcp.lan.ignore='0'
+
+		uci -q set firewall.@defaults[0].flow_offloading='1'
+		uci -q set firewall.@defaults[0].flow_offloading_hw='1'
+		;;
+
+	*)
+		echo "usage: $0 {router|ap|bridge}" >&2
+		exit 2
+		;;
+esac
+
+uci -q commit dir842
+uci -q commit network
+uci -q commit dhcp
+uci -q commit firewall
+
+# If this is bridge mode, disarm custom HW NAT immediately for the remainder of
+# this boot as well. The reboot then starts cleanly in bridge role.
+if [ "$mode" = "ap" ] || [ "$mode" = "bridge" ]; then
+	[ -w /sys/module/rtl819x/parameters/hwnat ] &&
+		echo 0 > /sys/module/rtl819x/parameters/hwnat || true
+fi
+
+logger -t dir842-mode "configured mode=$mode; reboot required"
+exit 0

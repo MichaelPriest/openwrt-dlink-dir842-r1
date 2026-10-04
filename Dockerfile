@@ -15,7 +15,19 @@
 #   docker build --build-arg U=$(id -u) --build-arg G=$(id -g) -t owrt-dir842 .
 FROM debian:bullseye
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+# Pin all Bullseye repositories to one dated snapshot.  The floating
+# debian:bullseye image can contain newer LTS packages than the live base
+# repository index; mixing those generations makes libc/openssl/perl
+# dependencies unsatisfiable.  A single snapshot keeps the toolchain coherent.
+ARG DEBIAN_SNAPSHOT=20260901T000000Z
+RUN printf '%s\n' \
+      "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ bullseye main" \
+      "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ bullseye-updates main" \
+      "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}/ bullseye-security main" \
+      > /etc/apt/sources.list && \
+    rm -f /etc/apt/sources.list.d/* && \
+    apt-get -o Acquire::Check-Valid-Until=false update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
       gettext git libncurses5-dev libssl-dev rsync unzip zlib1g-dev file \
       wget curl subversion swig time xsltproc libelf-dev bc python3 python2 \
