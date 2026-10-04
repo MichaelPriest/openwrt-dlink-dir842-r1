@@ -222,7 +222,13 @@ define Device/GWR1200AC-V1
   # entry = the lzma-loader link addr (LZMA_TEXT_START, image/Makefile:19), NOT
   # the Greatek 0x80a00000; the loader loads to start_addr and jumps there.
   CVIMG_LOADER_START_ADDR := 0x81000000
-  IMAGE/factory.bin = append-kernel | append-fake-rootfs | append-rootfs | cvimg-kernel-cr6b | cvimg-pad-rootfs | dlink-md5-sign
+  # Factory OTA/AUTOBURN must also carry the pad-rootfs deadc0de marker. Stock's
+  # updater writes only the uploaded file length; without this final padding the
+  # first rootfs_data eraseblock is left with stale bytes from the previous image,
+  # so mount_root falls back to /tmp/root and every config/password disappears on
+  # reboot. Keep the loader signature BEFORE pad-rootfs: the marker's eraseblock
+  # is intentionally disposable, while the keyed-MD5 trailer must survive there.
+  IMAGE/factory.bin = append-kernel | append-fake-rootfs | append-rootfs | cvimg-kernel-cr6b | cvimg-pad-rootfs | dlink-md5-sign | pad-rootfs
   # ★ sysupgrade MUST sign BEFORE pad-rootfs. pad-rootfs appends the jffs2
   # `deadc0de` rootfs_data marker and pads to BLOCKSIZE, so a trailer appended
   # after it lands inside rootfs_data's FIRST erase block — which mount_root
