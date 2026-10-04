@@ -98,6 +98,44 @@ cp "$SELF_DIR/feeds.conf" feeds.conf
                         luci-proto-ppp uhttpd uhttpd-mod-ubus \
                         cgi-io miniupnpd qos-scripts
 
+# LuCI 19.07 only exposes WPA/WPA2 choices for wireless types it knows
+# explicitly (mac80211/broadcom). The DIR-842 2.4 GHz radio uses our custom
+# rtl8192cd netifd backend, whose WPA2-PSK handshake runs inside the vendor
+# driver, so stock LuCI incorrectly offers only WEP/open. Teach the UI the
+# modes that rtl8192cd.sh actually accepts: psk2, psk-mixed and psk.
+LUCI_WIFI_JS="feeds/luci/modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js"
+python3 - "$LUCI_WIFI_JS" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+needle = """\t\t\t\telse if (hwtype == 'broadcom') {
+\t\t\t\t\tcrypto_modes.push(['psk2',     'WPA2-PSK',                    33]);
+\t\t\t\t\tcrypto_modes.push(['psk+psk2', 'WPA-PSK/WPA2-PSK Mixed Mode', 22]);
+\t\t\t\t\tcrypto_modes.push(['psk',      'WPA-PSK',                     21]);
+\t\t\t\t}
+"""
+replacement = """\t\t\t\telse if (hwtype == 'rtl8192cd') {
+\t\t\t\t\t// Vendor WEXT AP: WPA/WPA2 is handled in-kernel by rtl8192cd,
+\t\t\t\t\t// not hostapd. These values map directly in rtl8192cd.sh.
+\t\t\t\t\tcrypto_modes.push(['psk2',      'WPA2-PSK',                    35]);
+\t\t\t\t\tcrypto_modes.push(['psk-mixed', 'WPA-PSK/WPA2-PSK Mixed Mode', 22]);
+\t\t\t\t\tcrypto_modes.push(['psk',       'WPA-PSK',                     21]);
+\t\t\t\t}
+\t\t\t\telse if (hwtype == 'broadcom') {
+\t\t\t\t\tcrypto_modes.push(['psk2',     'WPA2-PSK',                    33]);
+\t\t\t\t\tcrypto_modes.push(['psk+psk2', 'WPA-PSK/WPA2-PSK Mixed Mode', 22]);
+\t\t\t\t\tcrypto_modes.push(['psk',      'WPA-PSK',                     21]);
+\t\t\t\t}
+"""
+if needle not in s:
+    raise SystemExit("ERROR: pinned LuCI wireless.js layout changed; rtl8192cd security patch not applied")
+p.write_text(s.replace(needle, replacement, 1))
+PY
+grep -q "hwtype == 'rtl8192cd'" "$LUCI_WIFI_JS" || {
+	echo "ERROR: LuCI rtl8192cd WPA2 support patch missing" >&2
+	exit 1
+}
+
 # Seed config: shipped from seed-m5.config so this script builds what the port
 # actually is today (squashfs flash image + LuCI + PPPoE + offload diagnostics), not
 # the historical minimal initramfs. Keep the seed as the single source of truth —
