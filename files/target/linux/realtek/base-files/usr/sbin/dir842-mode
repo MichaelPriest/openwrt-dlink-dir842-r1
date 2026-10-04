@@ -8,6 +8,18 @@ set -e
 
 mode="$1"
 
+# Optional UCI fields are not guaranteed to exist in every configuration.
+# With "set -e", a plain "uci -q delete" still returns non-zero when the
+# option is absent and used to abort AP conversion halfway through, leaving
+# only uncommitted /tmp/.uci deltas that vanished on reboot.
+uci_delete() {
+	uci -q delete "$1" >/dev/null 2>&1 || true
+}
+
+# Older preserved overlays may predate this config section. Make the role
+# selector self-healing instead of relying on the factory /etc/config/dir842.
+uci -q get dir842.asic >/dev/null 2>&1 || uci set dir842.asic='asic'
+
 find_vlan() {
 	local wanted="$1" s
 	for s in $(uci show network 2>/dev/null | sed -n "s/^network\.\([^=]*\)=switch_vlan$/\1/p"); do
@@ -40,10 +52,10 @@ case "$mode" in
 		uci -q set network.lan.type='bridge'
 		uci -q set network.lan.ifname='eth0.2'
 		uci -q set network.lan.proto='dhcp'
-		uci -q delete network.lan.ipaddr
-		uci -q delete network.lan.netmask
-		uci -q delete network.lan.gateway
-		uci -q delete network.lan.dns
+		uci_delete network.lan.ipaddr
+		uci_delete network.lan.netmask
+		uci_delete network.lan.gateway
+		uci_delete network.lan.dns
 
 		uci -q set network.wan.ifname='eth0.1'
 		uci -q set network.wan.proto='none'
@@ -51,10 +63,10 @@ case "$mode" in
 
 		# The upstream/main router owns DHCP in AP mode.
 		uci -q set dhcp.lan.ignore='1'
-		uci -q delete dhcp.lan.dhcpv6
-		uci -q delete dhcp.lan.ra
-		uci -q delete dhcp.lan.ra_slaac
-		uci -q delete dhcp.lan.ra_flags
+		uci_delete dhcp.lan.dhcpv6
+		uci_delete dhcp.lan.ra
+		uci_delete dhcp.lan.ra_slaac
+		uci_delete dhcp.lan.ra_flags
 
 		# L3/NAT offload is meaningless in a transparent bridge and historically
 		# caused stale-L2 blackholes on this ASIC.
@@ -73,8 +85,8 @@ case "$mode" in
 		uci -q set network.lan.proto='static'
 		uci -q set network.lan.ipaddr='192.168.0.1'
 		uci -q set network.lan.netmask='255.255.255.0'
-		uci -q delete network.lan.gateway
-		uci -q delete network.lan.dns
+		uci_delete network.lan.gateway
+		uci_delete network.lan.dns
 
 		uci -q set network.wan.ifname='eth0.1'
 		uci -q set network.wan.proto='dhcp'
