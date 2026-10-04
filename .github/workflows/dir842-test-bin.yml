@@ -50,6 +50,18 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Validate persistent overlay markers
+        run: |
+          set -eux
+          OUT=openwrt/bin/targets/realtek/rtl8197f
+          for img in "$OUT"/*-squashfs-factory.bin "$OUT"/*-squashfs-sysupgrade.bin; do
+            marker="$(tail -c 4 "$img" | od -An -tx1 | tr -d ' \\n')"
+            test "$marker" = "deadc0de"
+            size="$(stat -c %s "$img")"
+            test $(( (size - 4) % 65536 )) -eq 0
+            echo "overlay marker OK: $img size=$size marker=$marker"
+          done
+
       - name: Collect and checksum test images
         run: |
           set -eux
