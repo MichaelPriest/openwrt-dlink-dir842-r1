@@ -1,0 +1,16 @@
+#!/bin/sh
+# DIR-842 R1 LuCI defaults.
+# Run once per persistent overlay. The marker lives in system so a config-
+# preserving sysupgrade does not overwrite an operator's later theme/language.
+[ "$(uci -q get system.@system[0].dir842_luci_seeded)" = "1" ] && exit 0
+
+# luci-i18n-base-pt-br registers the pt_br language key. Material's own defaults
+# register the theme path; set both explicitly so first boot is deterministic.
+uci -q set luci.main.lang='pt_br'
+uci -q set luci.themes.Material='/luci-static/material'
+uci -q set luci.main.mediaurlbase='/luci-static/material'
+uci -q commit luci
+
+uci -q set system.@system[0].dir842_luci_seeded='1'
+uci -q commit system
+exit 0

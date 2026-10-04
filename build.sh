@@ -92,7 +92,8 @@ cp "$SELF_DIR/feeds.conf" feeds.conf
 # pages with it, and you get an image with no web UI and no error anywhere.
 # (That shipped once. The seed now also selects uhttpd/luci-mod-admin-full by
 # name so a feed change cannot repeat it.)
-./scripts/feeds install luci luci-base luci-mod-admin-full luci-theme-bootstrap \
+./scripts/feeds install luci luci-base luci-mod-admin-full \
+                        luci-theme-bootstrap luci-theme-material \
                         luci-app-firewall luci-app-upnp luci-app-opkg \
                         luci-proto-ppp uhttpd uhttpd-mod-ubus \
                         cgi-io miniupnpd qos-scripts
@@ -108,6 +109,22 @@ cp "$SELF_DIR/feeds.conf" feeds.conf
 cp "$SELF_DIR/seed-m5.config" .config
 
 make defconfig
+
+# DIR-842 LuCI contract: PT-BR and Material are intentional image features, not
+# optional feed side effects. Fail early if feed metadata drift makes them vanish.
+for cfg in \
+	'CONFIG_PACKAGE_luci-theme-material=y' \
+	'CONFIG_LUCI_LANG_pt_BR=y' \
+	'CONFIG_PACKAGE_luci-i18n-base-pt-br=y' \
+	'CONFIG_PACKAGE_luci-i18n-firewall-pt-br=y' \
+	'CONFIG_PACKAGE_luci-i18n-upnp-pt-br=y' \
+	'CONFIG_PACKAGE_luci-i18n-opkg-pt-br=y'
+do
+	grep -qx "$cfg" .config || {
+		echo "ERROR: required LuCI setting missing after defconfig: $cfg" >&2
+		exit 1
+	}
+done
 
 # CI-only fast preflight: unpack mac80211/backports and apply the Realtek patch
 # stack before spending the full build time.  This catches malformed/conflicting
