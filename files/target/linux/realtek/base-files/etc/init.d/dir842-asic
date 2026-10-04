@@ -148,12 +148,24 @@ asic_program() {
 	# ROUTER mode; in bridge role the ASIC is left in its loader L2 state and
 	# plain switching works (measured: association, broadcast/multicast and
 	# client ARP all traverse).
-	# Run the full reset in both roles. asic_up() sets fabric_gw_rearm
-	# before entering here: router=1 rebuilds L3/L4 state, bridge=0 leaves
-	# the fabric in clean L2-only mode. This also clears stale router state
-	# when switching router -> bridge via restart.
-	echo 3 > /sys/module/rtl819x/parameters/fabric_reset 2>/dev/null
-	sleep 3
+	# BOOT-TIME full reset is ROUTER ONLY.
+	#
+	# Bridge role intentionally leaves the fabric in the loader's known-good
+	# L2 state. Hardware validation on the AP path showed that an unconditional
+	# level-3 reset with fabric_gw_rearm=0 can leave the CPU/trunk path unable
+	# to reach the uplink while jack-to-jack switching still works: WiFi clients
+	# transmit DHCP DISCOVERs into eth0.2, but no OFFER returns and even
+	# `ping -I br-lan <upstream>` cannot resolve a neighbour. This matches the
+	# already-documented "soft degraded" residue after full-reset-without-gw-rearm
+	# (USEDDSC pinned at 18), which can require a cold power cycle to clear.
+	#
+	# Bridge *recovery* still keeps fabric_autoreset=3 with fabric_gw_rearm=0
+	# below, so a genuine RX-stall wedge may use the level-3 reset on demand.
+	# We simply do not manufacture that risky state on every clean AP boot.
+	if [ "$ROLE" = "router" ]; then
+		echo 3 > /sys/module/rtl819x/parameters/fabric_reset 2>/dev/null
+		sleep 3
+	fi
 	# read side-effect: gw_prog() programs the whole L3/L4 datapath. NOTE this WIPES
 	# the ASIC L2 tables, so the warm-up must come after.
 	# gw_prog: L3/L4 datapath + TEACR aging freeze. ROUTER ONLY (see asic_role).
@@ -213,8 +225,8 @@ asic_up() {
 	wait_netif_mac
 	asic_program
 	# The warm-up exists to re-prime the routed L2/ARP/nexthop chain after
-	# gw_prog. Bridge role does run the full fabric reset now, but it deliberately
-	# skips gw_prog/NAT and needs no routed nexthop warm-up.
+	# gw_prog. Bridge role skips the boot-time full reset and gw_prog/NAT, so
+	# it needs no routed nexthop warm-up.
 	if [ "$ROLE" = "router" ]; then
 		asic_warm
 	fi
