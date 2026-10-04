@@ -25,13 +25,22 @@
 # replaces start() with an empty service. Same trap as dir842-asic.
 START=99
 
-# ROLE GATE (added after measurement, 2026-08-23): this shim exists because the
-# S97 boot pass left the WIRELESS datapath dead — root cause was gw_prog wiping
-# the ASIC L2 tables (and fabric_reset re-arming them) after the radios came up.
-# Bridge role now runs NEITHER, so nothing wipes the tables and the shim has
-# nothing to repair. MEASURED: cold boot in bridge role with this service
-# disabled — client associated and passed traffic at 0% loss, settle_ran=0.
-# Router role still runs gw_prog, so it still needs the second pass.
+# ROLE-AWARE settle (updated after hardware validation, 2026-10-04):
+# Router role still needs the full idempotent ASIC restart after WiFi settles,
+# because gw_prog/fabric setup is load-order sensitive.
+#
+# Bridge role also needs a *late swconfig apply*, but NOT gw_prog/NAT and not a
+# full fabric reset. Hardware validation found a reproducible cold-boot state
+# where jack-to-jack switching was perfect (~475/254 Mbit/s), both radios
+# associated and emitted DHCP DISCOVERs into eth0.2, yet the CPU/br-lan could
+# not ARP/ping the upstream gateway and DHCP OFFERs never returned. The live
+# VLAN/PVID readback already looked correct. Re-running exactly:
+#
+#     swconfig dev switch0 set apply 1
+#
+# after the radios/network had settled immediately restored br-lan -> upstream
+# (5/5 pings, ~0.75 ms). So this is a programming/settle race, not a static UCI
+# PVID error. Keep bridge recovery minimal: late swconfig apply only.
 settle_role() {
 	local r
 	r="$(uci -q get dir842.asic.role)"
@@ -42,7 +51,6 @@ settle_role() {
 }
 
 start() {
-	[ "$(settle_role)" = "router" ] || return 0
 	# Backgrounded: boot must never block on this.
 	(
 		i=0
@@ -59,16 +67,21 @@ start() {
 		done
 		# Let hostapd finish its own bridge add/remove churn before reprogramming.
 		sleep 20
-		/etc/init.d/dir842-asic restart
+		role="$(settle_role)"
+		if [ "$role" = "bridge" ]; then
+			# Measured AP fix: a late switch apply repairs the CPU/trunk path
+			# without touching gw_prog/NAT or forcing a full fabric reset.
+			swconfig dev switch0 set apply 1 2>/dev/null
+		else
+			/etc/init.d/dir842-asic restart
+		fi
 		if [ "$settled" = 1 ]; then
-			logger -t asic-wifi-settle "ASIC re-programmed after wireless settled (waited ${i}s + 20s)"
+			logger -t asic-wifi-settle "$role settled: late switch/ASIC programming completed (waited ${i}s + 20s)"
 		else
 			# Only both radios up AND bridged counts as "settled" above, so a box
 			# running with one radio disabled (or one that just never comes up)
-			# always lands here: it waits the full 120s, then re-programs anyway
-			# on the assumption that whatever IS up has probably settled by now.
-			# Untested — nobody has run this port with a radio deliberately off.
-			logger -t asic-wifi-settle "gave up waiting for both radios after ${i}s, re-programmed anyway (20s more)"
+			# always lands here: it waits the full 120s, then applies anyway.
+			logger -t asic-wifi-settle "$role: gave up waiting for both radios after ${i}s; late switch/ASIC programming completed"
 		fi
 	) &
 }
